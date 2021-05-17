@@ -10,7 +10,7 @@ EnvironmentFile=-@SYSTEMD_ENV_FILE@
 Environment=CLUSTER=ceph
 ExecStart=/usr/bin/ceph-fuse -f --cluster ${CLUSTER} %I
 LockPersonality=true
-MemoryDenyWriteExecute=true
+MemoryDenyWriteExecute=false
 NoNewPrivileges=true
 # ceph-fuse requires access to /dev fuse device
 PrivateDevices=no

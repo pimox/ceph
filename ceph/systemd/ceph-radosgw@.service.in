@@ -12,7 +12,7 @@ EnvironmentFile=-@SYSTEMD_ENV_FILE@
 Environment=CLUSTER=ceph
 ExecStart=/usr/bin/radosgw -f --cluster ${CLUSTER} --name client.%i --setuser ceph --setgroup ceph
 LockPersonality=true
-MemoryDenyWriteExecute=true
+MemoryDenyWriteExecute=false
 NoNewPrivileges=true
 PrivateDevices=yes
 ProtectControlGroups=true

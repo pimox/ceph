@@ -14,7 +14,7 @@ ExecStart=/usr/bin/ceph-osd -f --cluster ${CLUSTER} --id %i --setuser ceph --set
 ExecStartPre=/usr/lib/ceph/ceph-osd-prestart.sh --cluster ${CLUSTER} --id %i
 ExecReload=/bin/kill -HUP $MAINPID
 LockPersonality=true
-MemoryDenyWriteExecute=true
+MemoryDenyWriteExecute=false
 # Need NewPrivileges via `sudo smartctl`
 NoNewPrivileges=false
 ProtectControlGroups=true

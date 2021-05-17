@@ -17,7 +17,7 @@ Environment=CLUSTER=ceph
 ExecStart=/usr/bin/ceph-mon -f --cluster ${CLUSTER} --id %i --setuser ceph --setgroup ceph
 ExecReload=/bin/kill -HUP $MAINPID
 LockPersonality=true
-MemoryDenyWriteExecute=true
+MemoryDenyWriteExecute=false
 # Need NewPrivileges via `sudo smartctl`
 NoNewPrivileges=false
 PrivateDevices=yes
