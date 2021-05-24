@@ -107,6 +107,7 @@ Depends: ceph-mgr (= ${binary:Version}),
          ceph-mon (= ${binary:Version}),
          ceph-osd (= ${binary:Version}),
 Recommends: ceph-mds (= ${binary:Version}),
+            ceph-dkms
 Description: distributed storage and file system
  Ceph is a massively scalable, open-source, distributed
  storage system that runs on commodity hardware and delivers object,
