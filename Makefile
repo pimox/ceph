@@ -72,12 +72,12 @@ all: ${DEBS} ${DBG_DEBS}
 	@echo ${DBG_DEBS}
 
 ${BUILDSRC}: ${SRCDIR} patches
-	rm -rf $@
+	#rm -rf $@
 	mkdir $@.tmp
 	rsync -ra ${SRCDIR}/ $@.tmp
 	cd $@.tmp; ln -s ../patches patches
 	cd $@.tmp; quilt push -a
-	cd $@.tmp; rm -rf .pc ./patches
+	cd $@.tmp; #rm -rf .pc ./patches
 	echo "git clone git://git.proxmox.com/git/ceph.git\\ngit checkout ${GITVERSION}" >  $@.tmp/debian/SOURCE
 	echo "debian/SOURCE" >> $@.tmp/debian/docs
 	echo "${GITVERSION}\\n${VER}" > $@.tmp/src/.git_version
@@ -88,8 +88,8 @@ ${BUILDSRC}: ${SRCDIR} patches
 deb: ${DEBS} ${DBG_DEBS}
 ${DEBS_REST} ${DBG_DEBS}: $(MAIN_DEB)
 $(MAIN_DEB): ${BUILDSRC}
-	cd ${BUILDSRC}; dpkg-buildpackage -b -uc -us -j1
-	lintian ${DEBS}
+	cd ${BUILDSRC}; dpkg-buildpackage -b -uc -us -j1 -nc
+	-lintian ${DEBS}
 	@echo ${DEBS}
 
 .PHONY: dsc
@@ -101,13 +101,13 @@ ${DSC}: ${BUILDSRC}
 # NOTE: always downloads latest version!
 .PHONY: download
 download:
-	rm -rf ${SRCDIR}.tmp ${SRCDIR}
+	#rm -rf ${SRCDIR}.tmp ${SRCDIR}
 	dgit -cdgit-distro.ceph.archive-query=aptget: -cdgit-distro.ceph.mirror=http://download.ceph.com/debian-octopus -cdgit-distro.ceph.git-check=false --apt-get:--option=Dir::Etc::Trusted=${CURDIR}/upstream-key.asc -d ceph clone ceph bionic ./${SRCDIR}.tmp
 	@echo "WARNING"
 	@echo "Check output above for verification errors!"
 	@echo "WARNING"
-	rm -rf ${SRCDIR}.tmp/.git
-	find ${SRCDIR}.tmp/ -type f -name '.gitignore' -delete
+	#rm -rf ${SRCDIR}.tmp/.git
+	#find ${SRCDIR}.tmp/ -type f -name '.gitignore' -delete
 	mv ${SRCDIR}.tmp/debian/changelog ${SRCDIR}.tmp/changelog.upstream
 	mv ${SRCDIR}.tmp ${SRCDIR}
 
@@ -119,7 +119,7 @@ distclean: clean
 
 .PHONY: clean
 clean:
-	rm -rf ${BUILDSRC} ${BUILDSRC}.tmp *_all.deb *_${ARCH}.deb *.changes *.dsc *.buildinfo *.tar.gz
+	#rm -rf ${BUILDSRC} ${BUILDSRC}.tmp *_all.deb *_${ARCH}.deb *.changes *.dsc *.buildinfo *.tar.gz
 
 .PHONY: dinstall
 dinstall: ${DEB}
