@@ -129,7 +129,7 @@ struct is_dynamic<dynamic_marker_t<T>> : public std::true_type {};
 #define dendl_impl                              \
      "";                                        \
       _logger.log(crimson::to_log_level(_lv),   \
-                  _out.str().c_str());          \
+                  "{}", _out.str().c_str());    \
     }                                           \
   } while (0)
 #elif defined(WITH_SEASTAR) && defined(WITH_ALIEN)
@@ -174,6 +174,11 @@ struct is_dynamic<dynamic_marker_t<T>> : public std::true_type {};
 #define lsubdout(cct, sub, v)  dout_impl(cct, ceph_subsys_##sub, v) dout_prefix
 #define ldout(cct, v)  dout_impl(cct, dout_subsys, v) dout_prefix
 #define lderr(cct) dout_impl(cct, ceph_subsys_, -1) dout_prefix
+
+#define ldpp_subdout(dpp, sub, v) 						\
+  if (decltype(auto) pdpp = (dpp); pdpp) /* workaround -Wnonnull-compare for 'this' */ \
+    dout_impl(pdpp->get_cct(), ceph_subsys_##sub, v) \
+      pdpp->gen_prefix(*_dout)
 
 #define ldpp_dout(dpp, v) 						\
   if (decltype(auto) pdpp = (dpp); pdpp) /* workaround -Wnonnull-compare for 'this' */ \

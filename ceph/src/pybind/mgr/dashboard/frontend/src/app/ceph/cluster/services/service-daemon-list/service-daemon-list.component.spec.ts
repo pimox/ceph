@@ -1,16 +1,17 @@
 import { HttpClientTestingModule } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import * as _ from 'lodash';
+import _ from 'lodash';
+import { NgxPipeFunctionModule } from 'ngx-pipe-function';
 import { of } from 'rxjs';
 
-import { configureTestBed, i18nProviders } from '../../../../../testing/unit-test-helper';
-import { CoreModule } from '../../../../core/core.module';
-import { CephServiceService } from '../../../../shared/api/ceph-service.service';
-import { HostService } from '../../../../shared/api/host.service';
-import { CdTableFetchDataContext } from '../../../../shared/models/cd-table-fetch-data-context';
-import { SharedModule } from '../../../../shared/shared.module';
-import { CephModule } from '../../../ceph.module';
+import { CephModule } from '~/app/ceph/ceph.module';
+import { CoreModule } from '~/app/core/core.module';
+import { CephServiceService } from '~/app/shared/api/ceph-service.service';
+import { HostService } from '~/app/shared/api/host.service';
+import { CdTableFetchDataContext } from '~/app/shared/models/cd-table-fetch-data-context';
+import { SharedModule } from '~/app/shared/shared.module';
+import { configureTestBed } from '~/testing/unit-test-helper';
 import { ServiceDaemonListComponent } from './service-daemon-list.component';
 
 describe('ServiceDaemonListComponent', () => {
@@ -68,6 +69,33 @@ describe('ServiceDaemonListComponent', () => {
     }
   ];
 
+  const services = [
+    {
+      service_type: 'osd',
+      service_name: 'osd',
+      status: {
+        container_image_id: 'e70344c77bcbf3ee389b9bf5128f635cf95f3d59e005c5d8e67fc19bcc74ed23',
+        container_image_name: 'docker.io/ceph/daemon-base:latest-master-devel',
+        size: 3,
+        running: 3,
+        last_refresh: '2020-02-25T04:33:26.465699'
+      },
+      events: '2021-03-22T07:34:48.582163Z service:osd [INFO] "service was created"'
+    },
+    {
+      service_type: 'crash',
+      service_name: 'crash',
+      status: {
+        container_image_id: 'e70344c77bcbf3ee389b9bf5128f635cf95f3d59e005c5d8e67fc19bcc74ed23',
+        container_image_name: 'docker.io/ceph/daemon-base:latest-master-devel',
+        size: 1,
+        running: 1,
+        last_refresh: '2020-02-25T04:33:26.465766'
+      },
+      events: '2021-03-22T07:34:48.582163Z service:osd [INFO] "service was created"'
+    }
+  ];
+
   const getDaemonsByHostname = (hostname?: string) => {
     return hostname ? _.filter(daemons, { hostname: hostname }) : daemons;
   };
@@ -77,22 +105,21 @@ describe('ServiceDaemonListComponent', () => {
   };
 
   configureTestBed({
-    imports: [HttpClientTestingModule, CephModule, CoreModule, SharedModule],
-    declarations: [],
-    providers: [i18nProviders]
+    imports: [HttpClientTestingModule, CephModule, CoreModule, NgxPipeFunctionModule, SharedModule]
   });
 
   beforeEach(() => {
     fixture = TestBed.createComponent(ServiceDaemonListComponent);
     component = fixture.componentInstance;
-    const hostService = TestBed.get(HostService);
-    const cephServiceService = TestBed.get(CephServiceService);
+    const hostService = TestBed.inject(HostService);
+    const cephServiceService = TestBed.inject(CephServiceService);
     spyOn(hostService, 'getDaemons').and.callFake(() =>
       of(getDaemonsByHostname(component.hostname))
     );
     spyOn(cephServiceService, 'getDaemons').and.callFake(() =>
       of(getDaemonsByServiceName(component.serviceName))
     );
+    spyOn(cephServiceService, 'list').and.returnValue(of(services));
     fixture.detectChanges();
   });
 
@@ -102,14 +129,19 @@ describe('ServiceDaemonListComponent', () => {
 
   it('should list daemons by host', () => {
     component.hostname = 'mon0';
-    component.getDaemons(new CdTableFetchDataContext(() => {}));
+    component.getDaemons(new CdTableFetchDataContext(() => undefined));
     expect(component.daemons.length).toBe(1);
   });
 
   it('should list daemons by service', () => {
     component.serviceName = 'osd';
-    component.getDaemons(new CdTableFetchDataContext(() => {}));
+    component.getDaemons(new CdTableFetchDataContext(() => undefined));
     expect(component.daemons.length).toBe(3);
+  });
+
+  it('should list services', () => {
+    component.getServices(new CdTableFetchDataContext(() => undefined));
+    expect(component.services.length).toBe(2);
   });
 
   it('should not display doc panel if orchestrator is available', () => {

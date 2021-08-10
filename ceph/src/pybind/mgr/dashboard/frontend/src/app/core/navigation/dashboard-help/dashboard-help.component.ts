@@ -1,9 +1,10 @@
-import { Component, OnInit, ViewChild } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 
-import { BsModalRef, BsModalService } from 'ngx-bootstrap/modal';
+import { NgbModalRef } from '@ng-bootstrap/ng-bootstrap';
 
-import { Icons } from '../../../shared/enum/icons.enum';
-import { DocService } from '../../../shared/services/doc.service';
+import { Icons } from '~/app/shared/enum/icons.enum';
+import { DocService } from '~/app/shared/services/doc.service';
+import { ModalService } from '~/app/shared/services/modal.service';
 import { AboutComponent } from '../about/about.component';
 
 @Component({
@@ -12,13 +13,11 @@ import { AboutComponent } from '../about/about.component';
   styleUrls: ['./dashboard-help.component.scss']
 })
 export class DashboardHelpComponent implements OnInit {
-  @ViewChild('docsForm', { static: true })
-  docsFormElement: any;
   docsUrl: string;
-  modalRef: BsModalRef;
+  modalRef: NgbModalRef;
   icons = Icons;
 
-  constructor(private modalService: BsModalService, private docService: DocService) {}
+  constructor(private modalService: ModalService, private docService: DocService) {}
 
   ngOnInit() {
     this.docService.subscribeOnce('dashboard', (url: string) => {
@@ -27,11 +26,6 @@ export class DashboardHelpComponent implements OnInit {
   }
 
   openAboutModal() {
-    this.modalRef = this.modalService.show(AboutComponent);
-    this.modalRef.setClass('modal-lg');
-  }
-
-  goToApiDocs() {
-    this.docsFormElement.nativeElement.submit();
+    this.modalRef = this.modalService.show(AboutComponent, null, { size: 'lg' });
   }
 }

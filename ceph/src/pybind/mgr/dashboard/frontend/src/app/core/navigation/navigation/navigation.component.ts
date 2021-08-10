@@ -2,16 +2,16 @@ import { Component, HostBinding, OnDestroy, OnInit } from '@angular/core';
 
 import { Subscription } from 'rxjs';
 
-import { Icons } from '../../../shared/enum/icons.enum';
-import { Permissions } from '../../../shared/models/permissions';
-import { AuthStorageService } from '../../../shared/services/auth-storage.service';
+import { Icons } from '~/app/shared/enum/icons.enum';
+import { Permissions } from '~/app/shared/models/permissions';
+import { AuthStorageService } from '~/app/shared/services/auth-storage.service';
 import {
   FeatureTogglesMap$,
   FeatureTogglesService
-} from '../../../shared/services/feature-toggles.service';
-import { PrometheusAlertService } from '../../../shared/services/prometheus-alert.service';
-import { SummaryService } from '../../../shared/services/summary.service';
-import { TelemetryNotificationService } from '../../../shared/services/telemetry-notification.service';
+} from '~/app/shared/services/feature-toggles.service';
+import { PrometheusAlertService } from '~/app/shared/services/prometheus-alert.service';
+import { SummaryService } from '~/app/shared/services/summary.service';
+import { TelemetryNotificationService } from '~/app/shared/services/telemetry-notification.service';
 
 @Component({
   selector: 'cd-navigation',
@@ -29,7 +29,7 @@ export class NavigationComponent implements OnInit, OnDestroy {
   summaryData: any;
   icons = Icons;
 
-  isCollapsed = true;
+  rightSidebarOpen = false; // rightSidebar only opens when width is less than 768px
   showMenuSidebar = true;
   displayedSubMenu = '';
 
@@ -94,6 +94,10 @@ export class NavigationComponent implements OnInit, OnDestroy {
     } else {
       this.displayedSubMenu = menu;
     }
+  }
+
+  toggleRightSidebar() {
+    this.rightSidebarOpen = !this.rightSidebarOpen;
   }
 
   showTopNotification(name: string, isDisplayed: boolean) {

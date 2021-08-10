@@ -335,7 +335,7 @@ struct crush_bucket_straw {
  * __h.alg__ == ::CRUSH_BUCKET_STRAW2.
  *
  * The weight of __h.items[i]__ is __item_weights[i]__ for i in
- * [0,__h.size__[.
+ * [0,__h.size__].
  */
 struct crush_bucket_straw2 {
         struct crush_bucket h; /*!< generic bucket information */
@@ -540,7 +540,7 @@ struct crush_work_bucket {
 	__u32 perm_x; /* @x for which *perm is defined */
 	__u32 perm_n; /* num elements of *perm that are permuted/defined */
 	__u32 *perm;  /* Permutation of the bucket's items */
-};
+} __attribute__ ((packed));
 
 struct crush_work {
 	struct crush_work_bucket **work; /* Per-bucket working store */

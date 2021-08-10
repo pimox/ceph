@@ -219,7 +219,18 @@ class RGWCoroutine : public RefCountedObject, public boost::asio::coroutine {
 
 protected:
   bool _yield_ret;
-  boost::asio::coroutine drain_cr;
+
+  struct {
+    boost::asio::coroutine cr;
+    bool should_exit{false};
+    int ret{0};
+
+    void init() {
+      cr = boost::asio::coroutine();
+      should_exit = false;
+      ret = 0;
+    }
+  } drain_status;
 
   CephContext *cct;
 
@@ -261,14 +272,14 @@ protected:
     return status;
   }
 
-  virtual int operate_wrapper() {
-    return operate();
+  virtual int operate_wrapper(const DoutPrefixProvider *dpp) {
+    return operate(dpp);
   }
 public:
   RGWCoroutine(CephContext *_cct) : status(_cct), _yield_ret(false), cct(_cct), stack(NULL), retcode(0), state(RGWCoroutine_Run) {}
   ~RGWCoroutine() override;
 
-  virtual int operate() = 0;
+  virtual int operate(const DoutPrefixProvider *dpp) = 0;
 
   bool is_done() { return (state == RGWCoroutine_Done || state == RGWCoroutine_Error); }
   bool is_error() { return (state == RGWCoroutine_Error); }
@@ -288,11 +299,23 @@ public:
 
   void call(RGWCoroutine *op); /* call at the same stack we're in */
   RGWCoroutinesStack *spawn(RGWCoroutine *op, bool wait); /* execute on a different stack */
-  bool collect(int *ret, RGWCoroutinesStack *skip_stack); /* returns true if needs to be called again */
+  bool collect(int *ret, RGWCoroutinesStack *skip_stack, uint64_t *stack_id = nullptr); /* returns true if needs to be called again */
   bool collect_next(int *ret, RGWCoroutinesStack **collected_stack = NULL); /* returns true if found a stack to collect */
 
+  RGWCoroutinesStack *prealloc_stack(); /* prepare a stack that will be used in the next spawn operation */
+  uint64_t prealloc_stack_id(); /* prepare a stack that will be used in the next spawn operation, return its id */
+
   int wait(const utime_t& interval);
-  bool drain_children(int num_cr_left, RGWCoroutinesStack *skip_stack = NULL); /* returns true if needed to be called again */
+  bool drain_children(int num_cr_left,
+                      RGWCoroutinesStack *skip_stack = nullptr,
+                      std::optional<std::function<void(uint64_t stack_id, int ret)> > cb = std::nullopt); /* returns true if needed to be called again,
+                                                                                                             cb will be called on completion of every
+                                                                                                             completion. */
+  bool drain_children(int num_cr_left,
+                      std::optional<std::function<int(uint64_t stack_id, int ret)> > cb); /* returns true if needed to be called again,
+                                                                                             cb will be called on every completion, can filter errors.
+                                                                                             A negative return value from cb means that current cr
+                                                                                             will need to exit */
   void wakeup();
   void set_sleeping(bool flag); /* put in sleep, or wakeup from sleep */
 
@@ -336,16 +359,38 @@ do {                            \
 } while (0)
 
 #define drain_all() \
-  drain_cr = boost::asio::coroutine(); \
+  drain_status.init(); \
   yield_until_true(drain_children(0))
 
 #define drain_all_but(n) \
-  drain_cr = boost::asio::coroutine(); \
+  drain_status.init(); \
   yield_until_true(drain_children(n))
 
 #define drain_all_but_stack(stack) \
-  drain_cr = boost::asio::coroutine(); \
+  drain_status.init(); \
   yield_until_true(drain_children(1, stack))
+
+#define drain_all_but_stack_cb(stack, cb) \
+  drain_status.init(); \
+  yield_until_true(drain_children(1, stack, cb))
+
+#define drain_with_cb(n, cb) \
+  drain_status.init(); \
+  yield_until_true(drain_children(n, cb)); \
+  if (drain_status.should_exit) { \
+    return set_cr_error(drain_status.ret); \
+  }
+
+#define drain_all_cb(cb) \
+  drain_with_cb(0, cb)
+
+#define yield_spawn_window(cr, n, cb) \
+  do { \
+    spawn(cr, false); \
+    drain_with_cb(n, cb); /* this is guaranteed to yield */ \
+  } while (0)
+
+
 
 template <class T>
 class RGWConsumerCR : public RGWCoroutine {
@@ -383,12 +428,16 @@ class RGWCoroutinesStack : public RefCountedObject {
 
   CephContext *cct;
 
+  int64_t id{-1};
+
   RGWCoroutinesManager *ops_mgr;
 
   list<RGWCoroutine *> ops;
   list<RGWCoroutine *>::iterator pos;
 
   rgw_spawned_stacks spawned;
+
+  RGWCoroutinesStack *preallocated_stack{nullptr};
 
   set<RGWCoroutinesStack *> blocked_by_stack;
   set<RGWCoroutinesStack *> blocking_stacks;
@@ -415,13 +464,17 @@ protected:
   RGWCoroutinesStack *parent;
 
   RGWCoroutinesStack *spawn(RGWCoroutine *source_op, RGWCoroutine *next_op, bool wait);
-  bool collect(RGWCoroutine *op, int *ret, RGWCoroutinesStack *skip_stack); /* returns true if needs to be called again */
+  bool collect(RGWCoroutine *op, int *ret, RGWCoroutinesStack *skip_stack, uint64_t *stack_id); /* returns true if needs to be called again */
   bool collect_next(RGWCoroutine *op, int *ret, RGWCoroutinesStack **collected_stack); /* returns true if found a stack to collect */
 public:
   RGWCoroutinesStack(CephContext *_cct, RGWCoroutinesManager *_ops_mgr, RGWCoroutine *start = NULL);
   ~RGWCoroutinesStack() override;
 
-  int operate(RGWCoroutinesEnv *env);
+  int64_t get_id() const {
+    return id;
+  }
+
+  int operate(const DoutPrefixProvider *dpp, RGWCoroutinesEnv *env);
 
   bool is_done() {
     return done_flag;
@@ -483,6 +536,7 @@ public:
 
   void call(RGWCoroutine *next_op);
   RGWCoroutinesStack *spawn(RGWCoroutine *next_op, bool wait);
+  RGWCoroutinesStack *prealloc_stack();
   int unwind(int retcode);
 
   int wait(const utime_t& interval);
@@ -492,7 +546,7 @@ public:
   }
   void io_complete(const rgw_io_id& io_id);
 
-  bool collect(int *ret, RGWCoroutinesStack *skip_stack); /* returns true if needs to be called again */
+  bool collect(int *ret, RGWCoroutinesStack *skip_stack, uint64_t *stack_id); /* returns true if needs to be called again */
 
   void cancel();
 
@@ -575,6 +629,7 @@ class RGWCoroutinesManager {
   map<uint64_t, set<RGWCoroutinesStack *> > run_contexts;
 
   std::atomic<int64_t> max_io_id = { 0 };
+  std::atomic<uint64_t> max_stack_id = { 0 };
 
   mutable ceph::shared_mutex lock =
     ceph::make_shared_mutex("RGWCoroutinesManager::lock");
@@ -608,8 +663,8 @@ public:
     }
   }
 
-  int run(list<RGWCoroutinesStack *>& ops);
-  int run(RGWCoroutine *op);
+  int run(const DoutPrefixProvider *dpp, list<RGWCoroutinesStack *>& ops);
+  int run(const DoutPrefixProvider *dpp, RGWCoroutine *op);
   void stop() {
     bool expected = false;
     if (going_down.compare_exchange_strong(expected, true)) {
@@ -629,6 +684,7 @@ public:
   RGWCoroutinesStack *allocate_stack();
 
   int64_t get_next_io_id();
+  uint64_t get_next_stack_id();
 
   void set_sleeping(RGWCoroutine *cr, bool flag);
   void io_complete(RGWCoroutine *cr, const rgw_io_id& io_id);
@@ -659,10 +715,10 @@ RGWAioCompletionNotifier *RGWCoroutinesStack::create_completion_notifier(T value
 class RGWSimpleCoroutine : public RGWCoroutine {
   bool called_cleanup;
 
-  int operate() override;
+  int operate(const DoutPrefixProvider *dpp) override;
 
   int state_init();
-  int state_send_request();
+  int state_send_request(const DoutPrefixProvider *dpp);
   int state_request_complete();
   int state_all_complete();
 
@@ -673,7 +729,7 @@ public:
   ~RGWSimpleCoroutine() override;
 
   virtual int init() { return 0; }
-  virtual int send_request() = 0;
+  virtual int send_request(const DoutPrefixProvider *dpp) = 0;
   virtual int request_complete() = 0;
   virtual int finish() { return 0; }
   virtual void request_cleanup() {}

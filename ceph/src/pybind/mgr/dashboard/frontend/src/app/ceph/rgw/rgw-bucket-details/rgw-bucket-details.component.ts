@@ -1,6 +1,6 @@
 import { Component, Input, OnChanges } from '@angular/core';
 
-import { RgwBucketService } from '../../../shared/api/rgw-bucket.service';
+import { RgwBucketService } from '~/app/shared/api/rgw-bucket.service';
 
 @Component({
   selector: 'cd-rgw-bucket-details',
@@ -16,6 +16,7 @@ export class RgwBucketDetailsComponent implements OnChanges {
   ngOnChanges() {
     if (this.selection) {
       this.rgwBucketService.get(this.selection.bid).subscribe((bucket: object) => {
+        bucket['lock_retention_period_days'] = this.rgwBucketService.getLockDays(bucket);
         this.selection = bucket;
       });
     }

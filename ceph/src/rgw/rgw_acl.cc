@@ -15,6 +15,64 @@
 
 #define dout_subsys ceph_subsys_rgw
 
+bool operator==(const ACLPermission& lhs, const ACLPermission& rhs) {
+  return lhs.flags == rhs.flags;
+}
+bool operator!=(const ACLPermission& lhs, const ACLPermission& rhs) {
+  return !(lhs == rhs);
+}
+
+bool operator==(const ACLGranteeType& lhs, const ACLGranteeType& rhs) {
+  return lhs.type == rhs.type;
+}
+bool operator!=(const ACLGranteeType& lhs, const ACLGranteeType& rhs) {
+  return lhs.type != rhs.type;
+}
+
+bool operator==(const ACLGrant& lhs, const ACLGrant& rhs) {
+  return lhs.type == rhs.type && lhs.id == rhs.id
+      && lhs.email == rhs.email && lhs.permission == rhs.permission
+      && lhs.name == rhs.name && lhs.group == rhs.group
+      && lhs.url_spec == rhs.url_spec;
+}
+bool operator!=(const ACLGrant& lhs, const ACLGrant& rhs) {
+  return !(lhs == rhs);
+}
+
+bool operator==(const ACLReferer& lhs, const ACLReferer& rhs) {
+  return lhs.url_spec == rhs.url_spec && lhs.perm == rhs.perm;
+}
+bool operator!=(const ACLReferer& lhs, const ACLReferer& rhs) {
+  return !(lhs == rhs);
+}
+
+bool operator==(const RGWAccessControlList& lhs,
+                const RGWAccessControlList& rhs) {
+  return lhs.acl_user_map == rhs.acl_user_map
+      && lhs.acl_group_map == rhs.acl_group_map
+      && lhs.referer_list == rhs.referer_list
+      && lhs.grant_map == rhs.grant_map;
+}
+bool operator!=(const RGWAccessControlList& lhs,
+                const RGWAccessControlList& rhs) {
+  return !(lhs == rhs);
+}
+
+bool operator==(const ACLOwner& lhs, const ACLOwner& rhs) {
+  return lhs.id == rhs.id && lhs.display_name == rhs.display_name;
+}
+bool operator!=(const ACLOwner& lhs, const ACLOwner& rhs) {
+  return !(lhs == rhs);
+}
+
+bool operator==(const RGWAccessControlPolicy& lhs,
+                const RGWAccessControlPolicy& rhs) {
+  return lhs.acl == rhs.acl && lhs.owner == rhs.owner;
+}
+bool operator!=(const RGWAccessControlPolicy& lhs,
+                const RGWAccessControlPolicy& rhs) {
+  return !(lhs == rhs);
+}
 
 void RGWAccessControlList::_add_grant(ACLGrant *grant)
 {
@@ -76,18 +134,19 @@ uint32_t RGWAccessControlList::get_perm(const DoutPrefixProvider* dpp,
   return perm_mask & auth_identity.get_perms_from_aclspec(dpp, acl_user_map);
 }
 
-uint32_t RGWAccessControlList::get_group_perm(ACLGroupTypeEnum group,
+uint32_t RGWAccessControlList::get_group_perm(const DoutPrefixProvider *dpp, 
+                                              ACLGroupTypeEnum group,
                                               const uint32_t perm_mask) const
 {
-  ldout(cct, 5) << "Searching permissions for group=" << (int)group
+  ldpp_dout(dpp, 5) << "Searching permissions for group=" << (int)group
                 << " mask=" << perm_mask << dendl;
 
   const auto iter = acl_group_map.find((uint32_t)group);
   if (iter != acl_group_map.end()) {
-    ldout(cct, 5) << "Found permission: " << iter->second << dendl;
+    ldpp_dout(dpp, 5) << "Found permission: " << iter->second << dendl;
     return iter->second & perm_mask;
   }
-  ldout(cct, 5) << "Permissions for group not found" << dendl;
+  ldpp_dout(dpp, 5) << "Permissions for group not found" << dendl;
   return 0;
 }
 
@@ -134,11 +193,11 @@ uint32_t RGWAccessControlPolicy::get_perm(const DoutPrefixProvider* dpp,
 
   /* should we continue looking up? */
   if (!ignore_public_acls && ((perm & perm_mask) != perm_mask)) {
-    perm |= acl.get_group_perm(ACL_GROUP_ALL_USERS, perm_mask);
+    perm |= acl.get_group_perm(dpp, ACL_GROUP_ALL_USERS, perm_mask);
 
     if (false == auth_identity.is_owner_of(rgw_user(RGW_USER_ANON_ID))) {
       /* this is not the anonymous user */
-      perm |= acl.get_group_perm(ACL_GROUP_AUTHENTICATED_USERS, perm_mask);
+      perm |= acl.get_group_perm(dpp, ACL_GROUP_AUTHENTICATED_USERS, perm_mask);
     }
   }
 
@@ -188,14 +247,14 @@ bool RGWAccessControlPolicy::verify_permission(const DoutPrefixProvider* dpp,
 }
 
 
-bool RGWAccessControlPolicy::is_public() const
+bool RGWAccessControlPolicy::is_public(const DoutPrefixProvider *dpp) const
 {
 
   static constexpr auto public_groups = {ACL_GROUP_ALL_USERS,
 					 ACL_GROUP_AUTHENTICATED_USERS};
   return std::any_of(public_groups.begin(), public_groups.end(),
-                         [&](ACLGroupTypeEnum g) {
-                           auto p = acl.get_group_perm(g, RGW_PERM_FULL_CONTROL);
+                         [&, dpp](ACLGroupTypeEnum g) {
+                           auto p = acl.get_group_perm(dpp, g, RGW_PERM_FULL_CONTROL);
                            return (p != RGW_PERM_NONE) && (p != RGW_PERM_INVALID);
                          }
                          );

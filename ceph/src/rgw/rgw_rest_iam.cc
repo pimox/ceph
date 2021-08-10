@@ -19,7 +19,7 @@
 void RGWHandler_REST_IAM::rgw_iam_parse_input()
 {
   if (post_body.size() > 0) {
-    ldout(s->cct, 10) << "Content of POST: " << post_body << dendl;
+    ldpp_dout(s, 10) << "Content of POST: " << post_body << dendl;
 
     if (post_body.find("Action") != string::npos) {
       boost::char_separator<char> sep("&");
@@ -89,16 +89,16 @@ int RGWHandler_REST_IAM::init(rgw::sal::RGWRadosStore *store,
   s->dialect = "iam";
 
   if (int ret = RGWHandler_REST_IAM::init_from_header(s, RGW_FORMAT_XML, true); ret < 0) {
-    ldout(s->cct, 10) << "init_from_header returned err=" << ret <<  dendl;
+    ldpp_dout(s, 10) << "init_from_header returned err=" << ret <<  dendl;
     return ret;
   }
 
   return RGWHandler_REST::init(store, s, cio);
 }
 
-int RGWHandler_REST_IAM::authorize(const DoutPrefixProvider* dpp)
+int RGWHandler_REST_IAM::authorize(const DoutPrefixProvider* dpp, optional_yield y)
 {
-  return RGW_Auth_S3::authorize(dpp, store, auth_registry, s);
+  return RGW_Auth_S3::authorize(dpp, store, auth_registry, s, y);
 }
 
 int RGWHandler_REST_IAM::init_from_header(struct req_state* s,
@@ -118,7 +118,7 @@ int RGWHandler_REST_IAM::init_from_header(struct req_state* s,
   }
 
   s->info.args.set(p);
-  s->info.args.parse();
+  s->info.args.parse(s);
 
   /* must be called after the args parsing */
   if (int ret = allocate_formatter(s, default_formatter, configurable_format); ret < 0)
@@ -144,9 +144,10 @@ int RGWHandler_REST_IAM::init_from_header(struct req_state* s,
 }
 
 RGWHandler_REST*
-RGWRESTMgr_IAM::get_handler(struct req_state* const s,
-                              const rgw::auth::StrategyRegistry& auth_registry,
-                              const std::string& frontend_prefix)
+RGWRESTMgr_IAM::get_handler(rgw::sal::RGWRadosStore *store,
+			    struct req_state* const s,
+			    const rgw::auth::StrategyRegistry& auth_registry,
+			    const std::string& frontend_prefix)
 {
   return new RGWHandler_REST_IAM(auth_registry);
 }

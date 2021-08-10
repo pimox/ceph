@@ -1,10 +1,14 @@
+import errno
 import logging
 import os
-from typing import List, Any, Tuple, Dict
+from typing import List, Any, Tuple, Dict, Optional, cast
+
+from mgr_module import HandleCommandResult
 
 from orchestrator import DaemonDescription
 from ceph.deployment.service_spec import AlertManagerSpec
-from cephadm.services.cephadmservice import CephadmService, CephadmDaemonSpec
+from cephadm.services.cephadmservice import CephadmService, CephadmDaemonDeploySpec
+from cephadm.services.ingress import IngressSpec
 from mgr_util import verify_tls, ServerConfigException, create_self_signed_cert
 
 logger = logging.getLogger(__name__)
@@ -14,17 +18,21 @@ class GrafanaService(CephadmService):
     TYPE = 'grafana'
     DEFAULT_SERVICE_PORT = 3000
 
-    def prepare_create(self, daemon_spec: CephadmDaemonSpec) -> CephadmDaemonSpec:
+    def prepare_create(self, daemon_spec: CephadmDaemonDeploySpec) -> CephadmDaemonDeploySpec:
         assert self.TYPE == daemon_spec.daemon_type
+        daemon_spec.final_config, daemon_spec.deps = self.generate_config(daemon_spec)
         return daemon_spec
 
-    def generate_config(self, daemon_spec: CephadmDaemonSpec) -> Tuple[Dict[str, Any], List[str]]:
+    def generate_config(self, daemon_spec: CephadmDaemonDeploySpec) -> Tuple[Dict[str, Any], List[str]]:
         assert self.TYPE == daemon_spec.daemon_type
         deps = []  # type: List[str]
 
         prom_services = []  # type: List[str]
         for dd in self.mgr.cache.get_daemons_by_service('prometheus'):
-            prom_services.append(dd.hostname)
+            assert dd.hostname is not None
+            addr = dd.ip if dd.ip else self._inventory_get_addr(dd.hostname)
+            port = dd.ports[0] if dd.ports else 9095
+            prom_services.append(addr + ':' + str(port))
             deps.append(dd.name())
         grafana_data_sources = self.mgr.template.render(
             'services/grafana/ceph-dashboard.yml.j2', {'hosts': prom_services})
@@ -47,7 +55,10 @@ class GrafanaService(CephadmService):
             })
 
         grafana_ini = self.mgr.template.render(
-            'services/grafana/grafana.ini.j2', {'http_port': self.DEFAULT_SERVICE_PORT})
+            'services/grafana/grafana.ini.j2', {
+                'http_port': daemon_spec.ports[0] if daemon_spec.ports else self.DEFAULT_SERVICE_PORT,
+                'http_addr': daemon_spec.ip if daemon_spec.ip else ''
+            })
 
         config_file = {
             'files': {
@@ -69,8 +80,10 @@ class GrafanaService(CephadmService):
     def config_dashboard(self, daemon_descrs: List[DaemonDescription]) -> None:
         # TODO: signed cert
         dd = self.get_active_daemon(daemon_descrs)
-        service_url = 'https://{}:{}'.format(
-            self._inventory_get_addr(dd.hostname), self.DEFAULT_SERVICE_PORT)
+        assert dd.hostname is not None
+        addr = dd.ip if dd.ip else self._inventory_get_addr(dd.hostname)
+        port = dd.ports[0] if dd.ports else self.DEFAULT_SERVICE_PORT
+        service_url = 'https://{}:{}'.format(addr, port)
         self._set_service_url_on_dashboard(
             'Grafana',
             'dashboard get-grafana-api-url',
@@ -78,26 +91,35 @@ class GrafanaService(CephadmService):
             service_url
         )
 
+    def ok_to_stop(self,
+                   daemon_ids: List[str],
+                   force: bool = False,
+                   known: Optional[List[str]] = None) -> HandleCommandResult:
+        warn, warn_message = self._enough_daemons_to_stop(self.TYPE, daemon_ids, 'Grafana', 1)
+        if warn and not force:
+            return HandleCommandResult(-errno.EBUSY, '', warn_message)
+        return HandleCommandResult(0, warn_message, '')
+
 
 class AlertmanagerService(CephadmService):
     TYPE = 'alertmanager'
     DEFAULT_SERVICE_PORT = 9093
 
-    def prepare_create(self, daemon_spec: CephadmDaemonSpec[AlertManagerSpec]) -> CephadmDaemonSpec:
+    def prepare_create(self, daemon_spec: CephadmDaemonDeploySpec) -> CephadmDaemonDeploySpec:
         assert self.TYPE == daemon_spec.daemon_type
-        assert daemon_spec.spec
+        daemon_spec.final_config, daemon_spec.deps = self.generate_config(daemon_spec)
         return daemon_spec
 
-    def generate_config(self, daemon_spec: CephadmDaemonSpec[AlertManagerSpec]) -> Tuple[Dict[str, Any], List[str]]:
+    def generate_config(self, daemon_spec: CephadmDaemonDeploySpec) -> Tuple[Dict[str, Any], List[str]]:
         assert self.TYPE == daemon_spec.daemon_type
         deps: List[str] = []
         default_webhook_urls: List[str] = []
 
-        if daemon_spec.spec:
-            user_data = daemon_spec.spec.user_data
-            if 'default_webhook_urls' in user_data and isinstance(
-                    user_data['default_webhook_urls'], list):
-                default_webhook_urls.extend(user_data['default_webhook_urls'])
+        spec = cast(AlertManagerSpec, self.mgr.spec_store[daemon_spec.service_name].spec)
+        user_data = spec.user_data
+        if 'default_webhook_urls' in user_data and isinstance(
+                user_data['default_webhook_urls'], list):
+            default_webhook_urls.extend(user_data['default_webhook_urls'])
 
         # dashboard(s)
         dashboard_urls: List[str] = []
@@ -119,6 +141,7 @@ class AlertmanagerService(CephadmService):
                 continue
             if dd.daemon_id == self.mgr.get_mgr_id():
                 continue
+            assert dd.hostname is not None
             addr = self.mgr.inventory.get_addr(dd.hostname)
             dashboard_urls.append('%s//%s:%s/' % (proto, addr.split(':')[0],
                                                   port))
@@ -132,6 +155,7 @@ class AlertmanagerService(CephadmService):
         peers = []
         port = '9094'
         for dd in self.mgr.cache.get_daemons_by_service('alertmanager'):
+            assert dd.hostname is not None
             deps.append(dd.name())
             addr = self.mgr.inventory.get_addr(dd.hostname)
             peers.append(addr.split(':')[0] + ':' + port)
@@ -151,8 +175,10 @@ class AlertmanagerService(CephadmService):
 
     def config_dashboard(self, daemon_descrs: List[DaemonDescription]) -> None:
         dd = self.get_active_daemon(daemon_descrs)
-        service_url = 'http://{}:{}'.format(self._inventory_get_addr(dd.hostname),
-                                            self.DEFAULT_SERVICE_PORT)
+        assert dd.hostname is not None
+        addr = dd.ip if dd.ip else self._inventory_get_addr(dd.hostname)
+        port = dd.ports[0] if dd.ports else self.DEFAULT_SERVICE_PORT
+        service_url = 'http://{}:{}'.format(addr, port)
         self._set_service_url_on_dashboard(
             'AlertManager',
             'dashboard get-alertmanager-api-host',
@@ -160,16 +186,26 @@ class AlertmanagerService(CephadmService):
             service_url
         )
 
+    def ok_to_stop(self,
+                   daemon_ids: List[str],
+                   force: bool = False,
+                   known: Optional[List[str]] = None) -> HandleCommandResult:
+        warn, warn_message = self._enough_daemons_to_stop(self.TYPE, daemon_ids, 'Alertmanager', 1)
+        if warn and not force:
+            return HandleCommandResult(-errno.EBUSY, '', warn_message)
+        return HandleCommandResult(0, warn_message, '')
+
 
 class PrometheusService(CephadmService):
     TYPE = 'prometheus'
     DEFAULT_SERVICE_PORT = 9095
 
-    def prepare_create(self, daemon_spec: CephadmDaemonSpec) -> CephadmDaemonSpec:
+    def prepare_create(self, daemon_spec: CephadmDaemonDeploySpec) -> CephadmDaemonDeploySpec:
         assert self.TYPE == daemon_spec.daemon_type
+        daemon_spec.final_config, daemon_spec.deps = self.generate_config(daemon_spec)
         return daemon_spec
 
-    def generate_config(self, daemon_spec: CephadmDaemonSpec) -> Tuple[Dict[str, Any], List[str]]:
+    def generate_config(self, daemon_spec: CephadmDaemonDeploySpec) -> Tuple[Dict[str, Any], List[str]]:
         assert self.TYPE == daemon_spec.daemon_type
         deps = []  # type: List[str]
 
@@ -194,30 +230,50 @@ class PrometheusService(CephadmService):
                 continue
             if dd.daemon_id == self.mgr.get_mgr_id():
                 continue
+            assert dd.hostname is not None
             addr = self.mgr.inventory.get_addr(dd.hostname)
             mgr_scrape_list.append(addr.split(':')[0] + ':' + port)
 
         # scrape node exporters
         nodes = []
         for dd in self.mgr.cache.get_daemons_by_service('node-exporter'):
+            assert dd.hostname is not None
             deps.append(dd.name())
-            addr = self.mgr.inventory.get_addr(dd.hostname)
+            addr = dd.ip if dd.ip else self.mgr.inventory.get_addr(dd.hostname)
+            port = str(dd.ports[0]) if dd.ports else '9100'
             nodes.append({
                 'hostname': dd.hostname,
-                'url': addr.split(':')[0] + ':9100'
+                'url': addr.split(':')[0] + ':' + port
             })
 
         # scrape alert managers
         alertmgr_targets = []
         for dd in self.mgr.cache.get_daemons_by_service('alertmanager'):
+            assert dd.hostname is not None
             deps.append(dd.name())
-            addr = self.mgr.inventory.get_addr(dd.hostname)
-            alertmgr_targets.append("'{}:9093'".format(addr.split(':')[0]))
+            addr = dd.ip if dd.ip else self.mgr.inventory.get_addr(dd.hostname)
+            port = str(dd.ports[0]) if dd.ports else '9093'
+            alertmgr_targets.append("'{}:{}'".format(addr.split(':')[0], port))
+
+        # scrape haproxies
+        haproxy_targets = []
+        for dd in self.mgr.cache.get_daemons_by_type('ingress'):
+            if dd.service_name() in self.mgr.spec_store:
+                spec = cast(IngressSpec, self.mgr.spec_store[dd.service_name()].spec)
+                assert dd.hostname is not None
+                deps.append(dd.name())
+                if dd.daemon_type == 'haproxy':
+                    addr = self.mgr.inventory.get_addr(dd.hostname)
+                    haproxy_targets.append({
+                        "url": f"'{addr.split(':')[0]}:{spec.monitor_port}'",
+                        "service": dd.service_name(),
+                    })
 
         # generate the prometheus configuration
         context = {
             'alertmgr_targets': alertmgr_targets,
             'mgr_scrape_list': mgr_scrape_list,
+            'haproxy_targets': haproxy_targets,
             'nodes': nodes,
         }
         r = {
@@ -245,8 +301,10 @@ class PrometheusService(CephadmService):
 
     def config_dashboard(self, daemon_descrs: List[DaemonDescription]) -> None:
         dd = self.get_active_daemon(daemon_descrs)
-        service_url = 'http://{}:{}'.format(
-            self._inventory_get_addr(dd.hostname), self.DEFAULT_SERVICE_PORT)
+        assert dd.hostname is not None
+        addr = dd.ip if dd.ip else self._inventory_get_addr(dd.hostname)
+        port = dd.ports[0] if dd.ports else self.DEFAULT_SERVICE_PORT
+        service_url = 'http://{}:{}'.format(addr, port)
         self._set_service_url_on_dashboard(
             'Prometheus',
             'dashboard get-prometheus-api-host',
@@ -254,14 +312,33 @@ class PrometheusService(CephadmService):
             service_url
         )
 
+    def ok_to_stop(self,
+                   daemon_ids: List[str],
+                   force: bool = False,
+                   known: Optional[List[str]] = None) -> HandleCommandResult:
+        warn, warn_message = self._enough_daemons_to_stop(self.TYPE, daemon_ids, 'Prometheus', 1)
+        if warn and not force:
+            return HandleCommandResult(-errno.EBUSY, '', warn_message)
+        return HandleCommandResult(0, warn_message, '')
+
 
 class NodeExporterService(CephadmService):
     TYPE = 'node-exporter'
 
-    def prepare_create(self, daemon_spec: CephadmDaemonSpec) -> CephadmDaemonSpec:
+    def prepare_create(self, daemon_spec: CephadmDaemonDeploySpec) -> CephadmDaemonDeploySpec:
         assert self.TYPE == daemon_spec.daemon_type
+        daemon_spec.final_config, daemon_spec.deps = self.generate_config(daemon_spec)
         return daemon_spec
 
-    def generate_config(self, daemon_spec: CephadmDaemonSpec) -> Tuple[Dict[str, Any], List[str]]:
+    def generate_config(self, daemon_spec: CephadmDaemonDeploySpec) -> Tuple[Dict[str, Any], List[str]]:
         assert self.TYPE == daemon_spec.daemon_type
         return {}, []
+
+    def ok_to_stop(self,
+                   daemon_ids: List[str],
+                   force: bool = False,
+                   known: Optional[List[str]] = None) -> HandleCommandResult:
+        # since node exporter runs on each host and cannot compromise data, no extra checks required
+        names = [f'{self.TYPE}.{d_id}' for d_id in daemon_ids]
+        out = f'It is presumed safe to stop {names}'
+        return HandleCommandResult(0, out, '')

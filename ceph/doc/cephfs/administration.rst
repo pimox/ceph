@@ -216,26 +216,112 @@ does not change a MDS; it manipulates the file system rank which has been
 marked damaged.
 
 
-Minimum Client Version
-----------------------
+Required Client Features
+------------------------
 
-It is sometimes desirable to set the minimum version of Ceph that a client must be
-running to connect to a CephFS cluster. Older clients may sometimes still be
-running with bugs that can cause locking issues between clients (due to
-capability release). CephFS provides a mechanism to set the minimum
-client version:
+It is sometimes desirable to set features that clients must support to talk to
+CephFS. Clients without those features may disrupt other clients or behave in
+surprising ways. Or, you may want to require newer features to prevent older
+and possibly buggy clients from connecting.
 
-::
-
-    fs set <fs name> min_compat_client <release>
-
-For example, to only allow Nautilus clients, use:
+Commands to manipulate required client features of a file system:
 
 ::
 
-    fs set cephfs min_compat_client nautilus
+    fs required_client_features <fs name> add reply_encoding
+    fs required_client_features <fs name> rm reply_encoding
 
-Clients running an older version will be automatically evicted.
+To list all CephFS features
+
+::
+
+    fs feature ls
+
+Clients that are missing newly added features will be evicted automatically.
+
+Here are the current CephFS features and first release they came out:
+
++------------------+--------------+-----------------+
+| Feature          | Ceph release | Upstream Kernel |
++==================+==============+=================+
+| jewel            | jewel        | 4.5             |
++------------------+--------------+-----------------+
+| kraken           | kraken       | 4.13            |
++------------------+--------------+-----------------+
+| luminous         | luminous     | 4.13            |
++------------------+--------------+-----------------+
+| mimic            | mimic        | 4.19            |
++------------------+--------------+-----------------+
+| reply_encoding   | nautilus     | 5.1             |
++------------------+--------------+-----------------+
+| reclaim_client   | nautilus     | N/A             |
++------------------+--------------+-----------------+
+| lazy_caps_wanted | nautilus     | 5.1             |
++------------------+--------------+-----------------+
+| multi_reconnect  | nautilus     | 5.1             |
++------------------+--------------+-----------------+
+| deleg_ino        | octopus      | 5.6             |
++------------------+--------------+-----------------+
+| metric_collect   | pacific      | N/A             |
++------------------+--------------+-----------------+
+| alternate_name   | pacific      | PLANNED         |
++------------------+--------------+-----------------+
+
+CephFS Feature Descriptions
+
+
+::
+
+    reply_encoding
+
+MDS encodes request reply in extensible format if client supports this feature.
+
+
+::
+
+    reclaim_client
+
+MDS allows new client to reclaim another (dead) client's states. This feature
+is used by NFS-Ganesha.
+
+
+::
+
+    lazy_caps_wanted
+
+When a stale client resumes, if the client supports this feature, mds only needs
+to re-issue caps that are explicitly wanted.
+
+
+::
+
+    multi_reconnect
+
+When mds failover, client sends reconnect messages to mds, to reestablish cache
+states. If MDS supports this feature, client can split large reconnect message
+into multiple ones.
+
+
+::
+
+    deleg_ino
+
+MDS delegate inode numbers to client if client supports this feature. Having
+delegated inode numbers is a prerequisite for client to do async file creation.
+
+
+::
+
+    metric_collect
+
+Clients can send performance metric to MDS if MDS support this feature.
+
+::
+
+    alternate_name
+
+Clients can set and understand "alternate names" for directory entries. This is
+to be used for encrypted file name support.
 
 
 Global settings

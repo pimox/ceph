@@ -23,7 +23,6 @@
 #include "librbd/api/Namespace.h"
 #include "librbd/io/AioCompletion.h"
 #include "librbd/io/ImageRequest.h"
-#include "librbd/io/ImageRequestWQ.h"
 #include "librbd/journal/Types.h"
 #include "librbd/mirror/snapshot/GetImageStateRequest.h"
 #include "librbd/mirror/snapshot/RemoveImageStateRequest.h"
@@ -1135,12 +1134,16 @@ TEST_F(TestMirroring, Snapshot)
   ASSERT_EQ(0, m_rbd.mirror_peer_site_add(m_ioctx, &peer_uuid,
                                           RBD_MIRROR_PEER_DIRECTION_RX_TX,
                                           "cluster", "client"));
+  // The mirroring was enabled when no peer was configured. Therefore, the
+  // initial snapshot has no peers linked and will be removed after the
+  // creation of a new mirror snapshot.
   ASSERT_EQ(0, image.mirror_image_create_snapshot(&snap_id));
   vector<librbd::snap_info_t> snaps;
   ASSERT_EQ(0, image.snap_list(snaps));
-  ASSERT_EQ(2U, snaps.size());
-  ASSERT_EQ(snaps[1].id, snap_id);
+  ASSERT_EQ(1U, snaps.size());
+  ASSERT_EQ(snaps[0].id, snap_id);
 
+  ASSERT_EQ(0, image.mirror_image_create_snapshot(&snap_id));
   ASSERT_EQ(0, image.mirror_image_create_snapshot(&snap_id));
   ASSERT_EQ(0, image.mirror_image_create_snapshot(&snap_id));
   snaps.clear();
@@ -1154,7 +1157,7 @@ TEST_F(TestMirroring, Snapshot)
   ASSERT_EQ(0, image.snap_list(snaps1));
   ASSERT_EQ(3U, snaps1.size());
   ASSERT_EQ(snaps1[0].id, snaps[0].id);
-  ASSERT_EQ(snaps1[1].id, snaps[2].id);
+  ASSERT_EQ(snaps1[1].id, snaps[1].id);
   ASSERT_EQ(snaps1[2].id, snap_id);
 
   librbd::snap_namespace_type_t snap_ns_type;
@@ -1378,7 +1381,7 @@ TEST_F(TestMirroring, SnapshotImageState)
   ASSERT_EQ(features & ~RBD_FEATURES_IMPLICIT_ENABLE, image_state.features);
   ASSERT_EQ(1U, image_state.snapshots.size());
   ASSERT_EQ("snap", image_state.snapshots.begin()->second.name);
-  ASSERT_TRUE(image_state.metadata.empty());
+  uint8_t original_pairs_num = image_state.metadata.size();
 
   {
     C_SaferCond cond;
@@ -1414,7 +1417,7 @@ TEST_F(TestMirroring, SnapshotImageState)
 
   ASSERT_EQ(image_name, image_state.name);
   ASSERT_EQ(features & ~RBD_FEATURES_IMPLICIT_ENABLE, image_state.features);
-  ASSERT_EQ(10U, image_state.metadata.size());
+  ASSERT_EQ(original_pairs_num + 10, image_state.metadata.size());
   for (int i = 0; i < 10; i++) {
     auto &bl = image_state.metadata[stringify(i)];
     ASSERT_EQ(0, strncmp(std::string(1024, 'A' + i).c_str(), bl.c_str(),

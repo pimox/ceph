@@ -37,7 +37,6 @@
 #include "common/common_init.h"
 #include "common/dout.h"
 
-#include "rgw_rados.h"
 #include "rgw_resolve.h"
 #include "rgw_op.h"
 #include "rgw_rest.h"
@@ -61,7 +60,6 @@
 #include <thread>
 #include <string>
 #include <mutex>
-
 
 #define dout_subsys ceph_subsys_rgw
 
@@ -124,7 +122,8 @@ namespace rgw {
 	RGWLibFS* fs = iter->first->ref();
 	uniq.unlock();
 	fs->gc();
-	fs->update_user();
+        const DoutPrefix dp(cct, dout_subsys, "librgw: ");
+	fs->update_user(&dp);
 	fs->rele();
 	uniq.lock();
 	if (cur_gen != gen)
@@ -135,7 +134,7 @@ namespace rgw {
     }
   }
 
-  void RGWLibProcess::handle_request(RGWRequest* r)
+  void RGWLibProcess::handle_request(const DoutPrefixProvider *dpp, RGWRequest* r)
   {
     /*
      * invariant: valid requests are derived from RGWLibRequst
@@ -206,7 +205,7 @@ namespace rgw {
      */
     RGWOp *op = (req->op) ? req->op : dynamic_cast<RGWOp*>(req);
     if (! op) {
-      dout(1) << "failed to derive cognate RGWOp (invalid op?)" << dendl;
+      ldpp_dout(op, 1) << "failed to derive cognate RGWOp (invalid op?)" << dendl;
       return -EINVAL;
     }
 
@@ -228,7 +227,7 @@ namespace rgw {
     rgw_env.set("HTTP_HOST", "");
 
     /* XXX and -then- bloat up req_state with string copies from it */
-    struct req_state rstate(req->cct, &rgw_env, req->get_user(), req->id);
+    struct req_state rstate(req->cct, &rgw_env, req->id);
     struct req_state *s = &rstate;
 
     // XXX fix this
@@ -242,7 +241,7 @@ namespace rgw {
     /* XXX and -then- stash req_state pointers everywhere they are needed */
     ret = req->init(rgw_env, &rados_ctx, io, s);
     if (ret < 0) {
-      dout(10) << "failed to initialize request" << dendl;
+      ldpp_dout(op, 10) << "failed to initialize request" << dendl;
       abort_req(s, op, ret);
       goto done;
     }
@@ -264,7 +263,7 @@ namespace rgw {
       /* XXX authorize does less here then in the REST path, e.g.,
        * the user's info is cached, but still incomplete */
       ldpp_dout(s, 2) << "authorizing" << dendl;
-      ret = req->authorize(op);
+      ret = req->authorize(op, null_yield);
       if (ret < 0) {
 	dout(10) << "failed to authorize request" << dendl;
 	abort_req(s, op, ret);
@@ -278,14 +277,14 @@ namespace rgw {
       }
 
       ldpp_dout(s, 2) << "reading op permissions" << dendl;
-      ret = req->read_permissions(op);
+      ret = req->read_permissions(op, null_yield);
       if (ret < 0) {
 	abort_req(s, op, ret);
 	goto done;
       }
 
       ldpp_dout(s, 2) << "init op" << dendl;
-      ret = op->init_processing();
+      ret = op->init_processing(null_yield);
       if (ret < 0) {
 	abort_req(s, op, ret);
 	goto done;
@@ -299,12 +298,12 @@ namespace rgw {
       }
 
       ldpp_dout(s, 2) << "verifying op permissions" << dendl;
-      ret = op->verify_permission();
+      ret = op->verify_permission(null_yield);
       if (ret < 0) {
 	if (s->system_request) {
-	  dout(2) << "overriding permissions due to system operation" << dendl;
+	  ldpp_dout(op, 2) << "overriding permissions due to system operation" << dendl;
 	} else if (s->auth.identity->is_admin_of(s->user->get_id())) {
-	  dout(2) << "overriding permissions due to admin operation" << dendl;
+	  ldpp_dout(op, 2) << "overriding permissions due to admin operation" << dendl;
 	} else {
 	  abort_req(s, op, ret);
 	  goto done;
@@ -320,7 +319,7 @@ namespace rgw {
 
       ldpp_dout(s, 2) << "executing" << dendl;
       op->pre_exec();
-      op->execute();
+      op->execute(null_yield);
       op->complete();
 
     } catch (const ceph::crypto::DigestException& e) {
@@ -344,7 +343,7 @@ namespace rgw {
 
     ldpp_dout(s, 2) << "http status=" << http_ret << dendl;
 
-    dout(1) << "====== " << __func__
+    ldpp_dout(op, 1) << "====== " << __func__
 	    << " req done req=" << hex << req << dec << " http_status="
 	    << http_ret
 	    << " ======" << dendl;
@@ -367,14 +366,26 @@ namespace rgw {
      */
     RGWOp *op = (req->op) ? req->op : dynamic_cast<RGWOp*>(req);
     if (! op) {
-      dout(1) << "failed to derive cognate RGWOp (invalid op?)" << dendl;
+      ldpp_dout(op, 1) << "failed to derive cognate RGWOp (invalid op?)" << dendl;
       return -EINVAL;
     }
 
     struct req_state* s = req->get_state();
+    RGWLibIO& io_ctx = req->get_io();
+    RGWEnv& rgw_env = io_ctx.get_env();
+    RGWObjectCtx& rados_ctx = req->get_octx();
+
+    rgw_env.set("HTTP_HOST", "");
+
+    int ret = req->init(rgw_env, &rados_ctx, &io_ctx, s);
+    if (ret < 0) {
+      ldpp_dout(op, 10) << "failed to initialize request" << dendl;
+      abort_req(s, op, ret);
+      goto done;
+    }
 
     /* req is-a RGWOp, currently initialized separately */
-    int ret = req->op_init();
+    ret = req->op_init();
     if (ret < 0) {
       dout(10) << "failed to initialize RGWOp" << dendl;
       abort_req(s, op, ret);
@@ -384,7 +395,7 @@ namespace rgw {
     /* XXX authorize does less here then in the REST path, e.g.,
      * the user's info is cached, but still incomplete */
     ldpp_dout(s, 2) << "authorizing" << dendl;
-    ret = req->authorize(op);
+    ret = req->authorize(op, null_yield);
     if (ret < 0) {
       dout(10) << "failed to authorize request" << dendl;
       abort_req(s, op, ret);
@@ -398,14 +409,14 @@ namespace rgw {
     }
 
     ldpp_dout(s, 2) << "reading op permissions" << dendl;
-    ret = req->read_permissions(op);
+    ret = req->read_permissions(op, null_yield);
     if (ret < 0) {
       abort_req(s, op, ret);
       goto done;
     }
 
     ldpp_dout(s, 2) << "init op" << dendl;
-    ret = op->init_processing();
+    ret = op->init_processing(null_yield);
     if (ret < 0) {
       abort_req(s, op, ret);
       goto done;
@@ -419,12 +430,12 @@ namespace rgw {
     }
 
     ldpp_dout(s, 2) << "verifying op permissions" << dendl;
-    ret = op->verify_permission();
+    ret = op->verify_permission(null_yield);
     if (ret < 0) {
       if (s->system_request) {
-	dout(2) << "overriding permissions due to system operation" << dendl;
+	ldpp_dout(op, 2) << "overriding permissions due to system operation" << dendl;
       } else if (s->auth.identity->is_admin_of(s->user->get_id())) {
-	dout(2) << "overriding permissions due to admin operation" << dendl;
+	ldpp_dout(op, 2) << "overriding permissions due to admin operation" << dendl;
       } else {
 	abort_req(s, op, ret);
 	goto done;
@@ -449,17 +460,19 @@ namespace rgw {
   {
     RGWOp *op = (req->op) ? req->op : dynamic_cast<RGWOp*>(req);
     if (! op) {
-      dout(1) << "failed to derive cognate RGWOp (invalid op?)" << dendl;
+      ldpp_dout(op, 1) << "failed to derive cognate RGWOp (invalid op?)" << dendl;
       return -EINVAL;
     }
 
     int ret = req->exec_finish();
     int op_ret = op->get_ret();
 
-    dout(1) << "====== " << __func__
+    ldpp_dout(op, 1) << "====== " << __func__
 	    << " finishing continued request req=" << hex << req << dec
 	    << " op status=" << op_ret
 	    << " ======" << dendl;
+
+    perfcounter->inc(l_rgw_req);
 
     return ret;
   }
@@ -524,7 +537,7 @@ namespace rgw {
       g_conf()->rgw_run_sync_thread &&
       g_conf()->rgw_nfs_run_sync_thread;
 
-    store = RGWStoreManager::get_storage(g_ceph_context,
+    store = RGWStoreManager::get_storage(this, g_ceph_context,
 					 run_gc,
 					 run_lc,
 					 run_quota,
@@ -643,7 +656,8 @@ namespace rgw {
 
   int RGWLibIO::set_uid(rgw::sal::RGWRadosStore *store, const rgw_user& uid)
   {
-    int ret = store->ctl()->user->get_info_by_uid(uid, &user_info, null_yield);
+    const DoutPrefix dp(store->ctx(), dout_subsys, "librgw: ");
+    int ret = store->ctl()->user->get_info_by_uid(&dp, uid, &user_info, null_yield);
     if (ret < 0) {
       derr << "ERROR: failed reading user info: uid=" << uid << " ret="
 	   << ret << dendl;
@@ -651,12 +665,12 @@ namespace rgw {
     return ret;
   }
 
-  int RGWLibRequest::read_permissions(RGWOp* op) {
+  int RGWLibRequest::read_permissions(RGWOp* op, optional_yield y) {
     /* bucket and object ops */
     int ret =
-      rgw_build_bucket_policies(rgwlib.get_store(), get_state());
+      rgw_build_bucket_policies(op, rgwlib.get_store(), get_state(), y);
     if (ret < 0) {
-      ldout(get_state()->cct, 10) << "read_permissions (bucket policy) on "
+      ldpp_dout(op, 10) << "read_permissions (bucket policy) on "
 				  << get_state()->bucket << ":"
 				  << get_state()->object
 				  << " only_bucket=" << only_bucket()
@@ -665,10 +679,10 @@ namespace rgw {
 	ret = -EACCES;
     } else if (! only_bucket()) {
       /* object ops */
-      ret = rgw_build_object_policies(rgwlib.get_store(), get_state(),
-				      op->prefetch_data());
+      ret = rgw_build_object_policies(op, rgwlib.get_store(), get_state(),
+				      op->prefetch_data(), y);
       if (ret < 0) {
-	ldout(get_state()->cct, 10) << "read_permissions (object policy) on"
+	ldpp_dout(op, 10) << "read_permissions (object policy) on"
 				    << get_state()->bucket << ":"
 				    << get_state()->object
 				    << " ret=" << ret << dendl;
@@ -679,7 +693,7 @@ namespace rgw {
     return ret;
   } /* RGWLibRequest::read_permissions */
 
-  int RGWHandler_Lib::authorize(const DoutPrefixProvider *dpp)
+  int RGWHandler_Lib::authorize(const DoutPrefixProvider *dpp, optional_yield y)
   {
     /* TODO: handle
      *  1. subusers

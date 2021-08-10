@@ -17,19 +17,13 @@ import codecs
 import copy
 import json
 import os
-
-import six
-from six.moves.html_parser import HTMLParser
+from html.parser import HTMLParser
 
 
 class TemplateParser(HTMLParser):
 
     def __init__(self, _file, search_tag):
-        if six.PY3:
-            super(TemplateParser, self).__init__()
-        else:
-            # HTMLParser is not a new-style class in py2
-            HTMLParser.__init__(self)
+        super().__init__()
         self.search_tag = search_tag
         self.file = _file
         self.parsed_data = []
@@ -52,10 +46,6 @@ class TemplateParser(HTMLParser):
         error_msg = 'fail to parse file {} (@{}): {}'.\
             format(self.file, self.getpos(), message)
         exit(error_msg)
-
-
-def stdout(msg):
-    six.print_(msg)
 
 
 def get_files(base_dir, file_ext):
@@ -82,28 +72,34 @@ def get_grafana_dashboards(base_dir):
     json_files = get_files(base_dir, 'json')
     dashboards = {}
     for json_file in json_files:
-        with open(json_file) as f:
-            dashboard_config = json.load(f)
-            uid = dashboard_config.get('uid')
+        try:
+            with open(json_file) as f:
+                dashboard_config = json.load(f)
+                uid = dashboard_config.get('uid')
+                assert dashboard_config['id'] is None, \
+                    "'id' not null: '{}'".format(dashboard_config['id'])
 
-            # Grafana dashboard checks
-            title = dashboard_config['title']
-            assert len(title) > 0, \
-                "Title not found in '{}'".format(json_file)
-            assert len(dashboard_config.get('links', [])) == 0, \
-                "Links found in '{}'".format(json_file)
-            if not uid:
-                continue
-            if uid in dashboards:
-                # duplicated uids
-                error_msg = 'Duplicated UID {} found, already defined in {}'.\
-                    format(uid, dashboards[uid]['file'])
-                exit(error_msg)
+                # Grafana dashboard checks
+                title = dashboard_config['title']
+                assert len(title) > 0, \
+                    "Title not found in '{}'".format(json_file)
+                assert len(dashboard_config.get('links', [])) == 0, \
+                    "Links found in '{}'".format(json_file)
+                if not uid:
+                    continue
+                if uid in dashboards:
+                    # duplicated uids
+                    error_msg = 'Duplicated UID {} found, already defined in {}'.\
+                        format(uid, dashboards[uid]['file'])
+                    exit(error_msg)
 
-            dashboards[uid] = {
-                'file': json_file,
-                'title': title
-            }
+                dashboards[uid] = {
+                    'file': json_file,
+                    'title': title
+                }
+        except Exception as e:
+            print(f"Error in file {json_file}")
+            raise e
     return dashboards
 
 
@@ -132,7 +128,7 @@ def main():
         exit(error_msg)
 
     if verbose:
-        stdout('Found mappings:')
+        print('Found mappings:')
     no_dashboard_tags = []
     for tag in tags:
         uid = tag['attrs']['uid']
@@ -144,7 +140,7 @@ def main():
                 format(uid, tag['file'], tag['line'],
                        grafana_dashboards[uid]['title'],
                        grafana_dashboards[uid]['file'])
-            stdout(msg)
+            print(msg)
 
     if no_dashboard_tags:
         title = ('Checking Grafana dashboards UIDs: ERROR\n'
@@ -156,7 +152,7 @@ def main():
         error_msg = title + '\n'.join(lines)
         exit(error_msg)
     else:
-        stdout('Checking Grafana dashboards UIDs: OK')
+        print('Checking Grafana dashboards UIDs: OK')
 
 
 if __name__ == '__main__':

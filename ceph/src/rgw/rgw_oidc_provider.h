@@ -7,6 +7,9 @@
 #include <string>
 
 #include "common/ceph_context.h"
+#include "common/ceph_json.h"
+
+#include "rgw/rgw_rados.h"
 
 class RGWCtl;
 
@@ -32,8 +35,8 @@ class RGWOIDCProvider
   vector<string> thumbprints;
 
   int get_tenant_url_from_arn(string& tenant, string& url);
-  int store_url(const string& url, bool exclusive);
-  int read_url(const string& url, const string& tenant);
+  int store_url(const DoutPrefixProvider *dpp, const string& url, bool exclusive, optional_yield y);
+  int read_url(const DoutPrefixProvider *dpp, const string& url, const string& tenant);
   bool validate_input();
 
 public:
@@ -107,15 +110,15 @@ public:
   const vector<string>& get_client_ids() const { return client_ids;}
   const vector<string>& get_thumbprints() const { return thumbprints; }
 
-  int create(bool exclusive);
-  int delete_obj();
-  int get();
+  int create(const DoutPrefixProvider *dpp, bool exclusive, optional_yield y);
+  int delete_obj(const DoutPrefixProvider *dpp, optional_yield y);
+  int get(const DoutPrefixProvider *dpp);
   void dump(Formatter *f) const;
   void dump_all(Formatter *f) const;
   void decode_json(JSONObj *obj);
 
   static const string& get_url_oid_prefix();
-  static int get_providers(RGWRados *store,
+  static int get_providers(const DoutPrefixProvider *dpp, RGWRados *store,
                             const string& tenant,
                             vector<RGWOIDCProvider>& providers);
 };

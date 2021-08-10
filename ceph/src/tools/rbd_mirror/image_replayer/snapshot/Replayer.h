@@ -130,6 +130,9 @@ private:
    *    |                       v                     | |
    *    |                 CREATE_NON_PRIMARY_SNAPSHOT | |
    *    |                       |                     | |
+   *    |                       v (skip if not needed)| |
+   *    |                 UPDATE_MIRROR_IMAGE_STATE   | |
+   *    |                       |                     | |
    *    |                       |/--------------------/ |
    *    |                       |                       |
    *    |                       v                       |
@@ -208,7 +211,7 @@ private:
   int m_error_code = 0;
   std::string m_error_description;
 
-  C_UpdateWatchCtx* m_update_watch_ctx;
+  C_UpdateWatchCtx* m_update_watch_ctx = nullptr;
   uint64_t m_local_update_watcher_handle = 0;
   uint64_t m_remote_update_watcher_handle = 0;
   bool m_image_updated = false;
@@ -268,6 +271,9 @@ private:
 
   void create_non_primary_snapshot();
   void handle_create_non_primary_snapshot(int r);
+
+  void update_mirror_image_state();
+  void handle_update_mirror_image_state(int r);
 
   void request_sync();
   void handle_request_sync(int r);

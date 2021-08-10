@@ -1,69 +1,63 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ViewChild } from '@angular/core';
 import { AbstractControl, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 
-import { I18n } from '@ngx-translate/i18n-polyfill';
-import * as _ from 'lodash';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { NgbTypeahead } from '@ng-bootstrap/ng-bootstrap';
+import _ from 'lodash';
+import { merge, Observable, Subject } from 'rxjs';
+import { debounceTime, distinctUntilChanged, filter, map } from 'rxjs/operators';
 
-import { CephServiceService } from '../../../../shared/api/ceph-service.service';
-import { HostService } from '../../../../shared/api/host.service';
-import { PoolService } from '../../../../shared/api/pool.service';
-import { SelectMessages } from '../../../../shared/components/select/select-messages.model';
-import { SelectOption } from '../../../../shared/components/select/select-option.model';
-import { ActionLabelsI18n, URLVerbs } from '../../../../shared/constants/app.constants';
-import { CdFormBuilder } from '../../../../shared/forms/cd-form-builder';
-import { CdFormGroup } from '../../../../shared/forms/cd-form-group';
-import { CdValidators } from '../../../../shared/forms/cd-validators';
-import { FinishedTask } from '../../../../shared/models/finished-task';
-import { TaskWrapperService } from '../../../../shared/services/task-wrapper.service';
+import { CephServiceService } from '~/app/shared/api/ceph-service.service';
+import { HostService } from '~/app/shared/api/host.service';
+import { PoolService } from '~/app/shared/api/pool.service';
+import { SelectMessages } from '~/app/shared/components/select/select-messages.model';
+import { SelectOption } from '~/app/shared/components/select/select-option.model';
+import { ActionLabelsI18n, URLVerbs } from '~/app/shared/constants/app.constants';
+import { CdForm } from '~/app/shared/forms/cd-form';
+import { CdFormBuilder } from '~/app/shared/forms/cd-form-builder';
+import { CdFormGroup } from '~/app/shared/forms/cd-form-group';
+import { CdValidators } from '~/app/shared/forms/cd-validators';
+import { FinishedTask } from '~/app/shared/models/finished-task';
+import { CephServiceSpec } from '~/app/shared/models/service.interface';
+import { TaskWrapperService } from '~/app/shared/services/task-wrapper.service';
 
 @Component({
   selector: 'cd-service-form',
   templateUrl: './service-form.component.html',
   styleUrls: ['./service-form.component.scss']
 })
-export class ServiceFormComponent implements OnInit {
+export class ServiceFormComponent extends CdForm implements OnInit {
+  @ViewChild(NgbTypeahead, { static: false })
+  typeahead: NgbTypeahead;
+
   serviceForm: CdFormGroup;
   action: string;
   resource: string;
   serviceTypes: string[] = [];
   hosts: any;
   labels: string[];
+  labelClick = new Subject<string>();
+  labelFocus = new Subject<string>();
   pools: Array<object>;
-
-  searchLabels: Observable<any> = new Observable((observer: any) => {
-    observer.next(this.serviceForm.getValue('label'));
-  }).pipe(
-    map((value: string) => {
-      const result = this.labels
-        .filter((label: string) => label.toLowerCase().indexOf(value.toLowerCase()) > -1)
-        .slice(0, 10);
-      return result;
-    })
-  );
+  services: Array<CephServiceSpec> = [];
 
   constructor(
     public actionLabels: ActionLabelsI18n,
     private cephServiceService: CephServiceService,
     private formBuilder: CdFormBuilder,
     private hostService: HostService,
-    private i18n: I18n,
     private poolService: PoolService,
     private router: Router,
     private taskWrapperService: TaskWrapperService
   ) {
-    this.resource = this.i18n(`service`);
+    super();
+    this.resource = $localize`service`;
     this.hosts = {
       options: [],
-      messages: new SelectMessages(
-        {
-          empty: this.i18n(`There are no hosts.`),
-          filter: this.i18n(`Filter hosts`)
-        },
-        this.i18n
-      )
+      messages: new SelectMessages({
+        empty: $localize`There are no hosts.`,
+        filter: $localize`Filter hosts`
+      })
     };
     this.createForm();
   }
@@ -83,6 +77,9 @@ export class ServiceFormComponent implements OnInit {
           }),
           CdValidators.requiredIf({
             service_type: 'iscsi'
+          }),
+          CdValidators.requiredIf({
+            service_type: 'ingress'
           }),
           CdValidators.composeIf(
             {
@@ -155,7 +152,29 @@ export class ServiceFormComponent implements OnInit {
           })
         ]
       ],
-      // RGW & iSCSI
+      // Ingress
+      backend_service: [
+        null,
+        [
+          CdValidators.requiredIf({
+            service_type: 'ingress',
+            unmanaged: false
+          })
+        ]
+      ],
+      virtual_ip: [
+        null,
+        [
+          CdValidators.requiredIf({
+            service_type: 'ingress',
+            unmanaged: false
+          })
+        ]
+      ],
+      frontend_port: [null, [CdValidators.number(false), Validators.min(1), Validators.max(65535)]],
+      monitor_port: [null, [CdValidators.number(false), Validators.min(1), Validators.max(65535)]],
+      virtual_interface_networks: [null],
+      // RGW, Ingress & iSCSI
       ssl: [false],
       ssl_cert: [
         '',
@@ -205,8 +224,10 @@ export class ServiceFormComponent implements OnInit {
   ngOnInit(): void {
     this.action = this.actionLabels.CREATE;
     this.cephServiceService.getKnownTypes().subscribe((resp: Array<string>) => {
-      // Remove service type 'osd', this is deployed a different way.
-      this.serviceTypes = _.difference(resp, ['osd']).sort();
+      // Remove service types:
+      // osd       - This is deployed a different way.
+      // container - This should only be used in the CLI.
+      this.serviceTypes = _.difference(resp, ['container', 'osd']).sort();
     });
     this.hostService.list().subscribe((resp: object[]) => {
       const options: SelectOption[] = [];
@@ -224,23 +245,47 @@ export class ServiceFormComponent implements OnInit {
     this.poolService.getList().subscribe((resp: Array<object>) => {
       this.pools = resp;
     });
+    this.cephServiceService.list().subscribe((services: CephServiceSpec[]) => {
+      this.services = services.filter((service: any) => service.service_type === 'rgw');
+    });
   }
 
   goToListView() {
     this.router.navigate(['/services']);
   }
 
+  searchLabels = (text$: Observable<string>) => {
+    return merge(
+      text$.pipe(debounceTime(200), distinctUntilChanged()),
+      this.labelFocus,
+      this.labelClick.pipe(filter(() => !this.typeahead.isPopupOpen()))
+    ).pipe(
+      map((value) =>
+        this.labels
+          .filter((label: string) => label.toLowerCase().indexOf(value.toLowerCase()) > -1)
+          .slice(0, 10)
+      )
+    );
+  };
+
   fileUpload(files: FileList, controlName: string) {
     const file: File = files[0];
     const reader = new FileReader();
-    reader.addEventListener('load', (event: ProgressEvent) => {
+    reader.addEventListener('load', (event: ProgressEvent<FileReader>) => {
       const control: AbstractControl = this.serviceForm.get(controlName);
-      control.setValue((event.target as FileReader).result);
+      control.setValue(event.target.result);
       control.markAsDirty();
       control.markAsTouched();
       control.updateValueAndValidity();
     });
     reader.readAsText(file, 'utf8');
+  }
+
+  prePopulateId() {
+    const control: AbstractControl = this.serviceForm.get('service_id');
+    const backendService = this.serviceForm.getValue('backend_service');
+    // Set Id as read-only
+    control.reset({ value: backendService, disabled: true });
   }
 
   onSubmit() {
@@ -292,9 +337,7 @@ export class ServiceFormComponent implements OnInit {
         case 'iscsi':
           serviceSpec['pool'] = values['pool'];
           if (_.isString(values['trusted_ip_list']) && !_.isEmpty(values['trusted_ip_list'])) {
-            let parts = _.split(values['trusted_ip_list'], ',');
-            parts = _.map(parts, _.trim);
-            serviceSpec['trusted_ip_list'] = parts;
+            serviceSpec['trusted_ip_list'] = values['trusted_ip_list'].trim();
           }
           if (_.isNumber(values['api_port']) && values['api_port'] > 0) {
             serviceSpec['api_port'] = values['api_port'];
@@ -306,6 +349,25 @@ export class ServiceFormComponent implements OnInit {
             serviceSpec['ssl_cert'] = values['ssl_cert'].trim();
             serviceSpec['ssl_key'] = values['ssl_key'].trim();
           }
+          break;
+        case 'ingress':
+          serviceSpec['backend_service'] = values['backend_service'];
+          serviceSpec['service_id'] = values['backend_service'];
+          if (_.isString(values['virtual_ip']) && !_.isEmpty(values['virtual_ip'])) {
+            serviceSpec['virtual_ip'] = values['virtual_ip'].trim();
+          }
+          if (_.isNumber(values['frontend_port']) && values['frontend_port'] > 0) {
+            serviceSpec['frontend_port'] = values['frontend_port'];
+          }
+          if (_.isNumber(values['monitor_port']) && values['monitor_port'] > 0) {
+            serviceSpec['monitor_port'] = values['monitor_port'];
+          }
+          serviceSpec['ssl'] = values['ssl'];
+          if (values['ssl']) {
+            serviceSpec['ssl_cert'] = values['ssl_cert'].trim();
+            serviceSpec['ssl_key'] = values['ssl_key'].trim();
+          }
+          serviceSpec['virtual_interface_networks'] = values['virtual_interface_networks'];
           break;
       }
     }

@@ -10,12 +10,13 @@ import {
 } from '@angular/core';
 
 import * as Chart from 'chart.js';
-import * as _ from 'lodash';
+import _ from 'lodash';
 import { PluginServiceGlobalRegistrationAndOptions } from 'ng2-charts';
 
-import { ChartTooltip } from '../../../shared/models/chart-tooltip';
-import { DimlessBinaryPipe } from '../../../shared/pipes/dimless-binary.pipe';
-import { DimlessPipe } from '../../../shared/pipes/dimless.pipe';
+import { CssHelper } from '~/app/shared/classes/css-helper';
+import { ChartTooltip } from '~/app/shared/models/chart-tooltip';
+import { DimlessBinaryPipe } from '~/app/shared/pipes/dimless-binary.pipe';
+import { DimlessPipe } from '~/app/shared/pipes/dimless.pipe';
 
 @Component({
   selector: 'cd-health-pie',
@@ -52,11 +53,11 @@ export class HealthPieComponent implements OnChanges, OnInit {
     colors: [
       {
         backgroundColor: [
-          '--color-green',
-          '--color-yellow',
-          '--color-orange',
-          '--color-red',
-          '--color-blue'
+          this.cssHelper.propertyValue('chart-color-green'),
+          this.cssHelper.propertyValue('chart-color-yellow'),
+          this.cssHelper.propertyValue('chart-color-orange'),
+          this.cssHelper.propertyValue('chart-color-red'),
+          this.cssHelper.propertyValue('chart-color-blue')
         ]
       }
     ],
@@ -77,7 +78,7 @@ export class HealthPieComponent implements OnChanges, OnInit {
       tooltips: {
         enabled: true,
         displayColors: false,
-        backgroundColor: 'rgba(0,0,0,0.8)',
+        backgroundColor: this.cssHelper.propertyValue('chart-color-tooltip-background'),
         cornerRadius: 0,
         bodyFontSize: 14,
         bodyFontStyle: '600',
@@ -104,8 +105,7 @@ export class HealthPieComponent implements OnChanges, OnInit {
     {
       id: 'center_text',
       beforeDraw(chart: Chart) {
-        const defaultFontColorA = '#151515';
-        const defaultFontColorB = '#72767B';
+        const cssHelper = new CssHelper();
         const defaultFontFamily = 'Helvetica Neue, Helvetica, Arial, sans-serif';
         Chart.defaults.global.defaultFontFamily = defaultFontFamily;
         const ctx = chart.ctx;
@@ -122,12 +122,12 @@ export class HealthPieComponent implements OnChanges, OnInit {
         ctx.textBaseline = 'middle';
 
         ctx.font = `24px ${defaultFontFamily}`;
-        ctx.fillStyle = defaultFontColorA;
+        ctx.fillStyle = cssHelper.propertyValue('chart-color-center-text');
         ctx.fillText(label[0], centerX, centerY - 10);
 
         if (label.length > 1) {
           ctx.font = `14px ${defaultFontFamily}`;
-          ctx.fillStyle = defaultFontColorB;
+          ctx.fillStyle = cssHelper.propertyValue('chart-color-center-text-description');
           ctx.fillText(label[1], centerX, centerY + 10);
         }
         ctx.restore();
@@ -135,7 +135,11 @@ export class HealthPieComponent implements OnChanges, OnInit {
     }
   ];
 
-  constructor(private dimlessBinary: DimlessBinaryPipe, private dimless: DimlessPipe) {}
+  constructor(
+    private dimlessBinary: DimlessBinaryPipe,
+    private dimless: DimlessPipe,
+    private cssHelper: CssHelper
+  ) {}
 
   ngOnInit() {
     const getStyleTop = (tooltip: any, positionY: number) => {
@@ -159,32 +163,12 @@ export class HealthPieComponent implements OnChanges, OnInit {
 
     _.merge(this.chartConfig, this.config);
 
-    this.setColorsFromCssVars();
-
     this.prepareFn.emit([this.chartConfig, this.data]);
   }
 
   ngOnChanges() {
     this.prepareFn.emit([this.chartConfig, this.data]);
     this.setChartSliceBorderWidth();
-  }
-
-  private setColorsFromCssVars() {
-    this.chartConfig.colors.forEach(
-      (colorEl: { backgroundColor: string[] }, colorIndex: number) => {
-        colorEl.backgroundColor.forEach((bgColor: string, bgColorIndex: number) => {
-          if (bgColor.startsWith('--')) {
-            this.chartConfig.colors[colorIndex].backgroundColor[bgColorIndex] = this.getCssVar(
-              bgColor
-            );
-          }
-        });
-      }
-    );
-  }
-
-  private getCssVar(name: string): string {
-    return getComputedStyle(document.querySelector('.chart-container')).getPropertyValue(name);
   }
 
   private getChartTooltipBody(body: string[]) {

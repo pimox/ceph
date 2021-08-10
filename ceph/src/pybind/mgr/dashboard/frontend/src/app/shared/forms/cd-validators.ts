@@ -6,8 +6,7 @@ import {
   Validators
 } from '@angular/forms';
 
-import { I18n } from '@ngx-translate/i18n-polyfill';
-import * as _ from 'lodash';
+import _ from 'lodash';
 import { Observable, of as observableOf, timer as observableTimer } from 'rxjs';
 import { map, switchMapTo, take } from 'rxjs/operators';
 
@@ -348,18 +347,27 @@ export class CdValidators {
   static unique(
     serviceFn: existsServiceFn,
     serviceFnThis: any = null,
-    dueTime = 500
+    usernameFn?: Function,
+    uidField = false
   ): AsyncValidatorFn {
+    let uName: string;
     return (control: AbstractControl): Observable<ValidationErrors | null> => {
       // Exit immediately if user has not interacted with the control yet
       // or the control value is empty.
       if (control.pristine || isEmptyInputValue(control.value)) {
         return observableOf(null);
       }
-      // Forgot previous requests if a new one arrives within the specified
-      // delay time.
-      return observableTimer(dueTime).pipe(
-        switchMapTo(serviceFn.call(serviceFnThis, control.value)),
+      uName = control.value;
+      if (_.isFunction(usernameFn) && usernameFn() !== null && usernameFn() !== '') {
+        if (uidField) {
+          uName = `${control.value}$${usernameFn()}`;
+        } else {
+          uName = `${usernameFn()}$${control.value}`;
+        }
+      }
+
+      return observableTimer().pipe(
+        switchMapTo(serviceFn.call(serviceFnThis, uName)),
         map((resp: boolean) => {
           if (!resp) {
             return null;
@@ -399,7 +407,7 @@ export class CdValidators {
    * be called in a static one.
    */
   static binaryMin(bytes: number): ValidatorFn {
-    return (control: AbstractControl): { [key: string]: (i18n: I18n) => string } | null => {
+    return (control: AbstractControl): { [key: string]: () => string } | null => {
       const formatterService = new FormatterService();
       const currentBytes = new FormatterService().toBytes(control.value);
       if (bytes <= currentBytes) {
@@ -407,7 +415,7 @@ export class CdValidators {
       }
       const value = new DimlessBinaryPipe(formatterService).transform(bytes);
       return {
-        binaryMin: (i18n: I18n) => i18n(`Size has to be at least {{value}} or more`, { value })
+        binaryMin: () => $localize`Size has to be at least ${value} or more`
       };
     };
   }
@@ -419,7 +427,7 @@ export class CdValidators {
    * be called in a static one.
    */
   static binaryMax(bytes: number): ValidatorFn {
-    return (control: AbstractControl): { [key: string]: (i18n: I18n) => string } | null => {
+    return (control: AbstractControl): { [key: string]: () => string } | null => {
       const formatterService = new FormatterService();
       const currentBytes = formatterService.toBytes(control.value);
       if (bytes >= currentBytes) {
@@ -427,7 +435,7 @@ export class CdValidators {
       }
       const value = new DimlessBinaryPipe(formatterService).transform(bytes);
       return {
-        binaryMax: (i18n: I18n) => i18n(`Size has to be at most {{value}} or less`, { value })
+        binaryMax: () => $localize`Size has to be at most ${value} or less`
       };
     };
   }

@@ -1,9 +1,5 @@
 <cd-rbd-tabs></cd-rbd-tabs>
 
-<cd-view-cache *ngFor="let viewCacheStatus of viewCacheStatusList"
-               [status]="viewCacheStatus.status"
-               [statusFor]="viewCacheStatus.statusFor"></cd-view-cache>
-
 <cd-table #table
           [data]="images"
           columnMode="flex"
@@ -13,6 +9,9 @@
           forceIdentifier="true"
           selectionType="single"
           [hasDetails]="true"
+          [status]="tableStatus"
+          [autoReload]="-1"
+          (fetchData)="taskListService.fetch()"
           (setExpandedRow)="setExpandedRow($event)"
           (updateSelection)="updateSelection($event)">
   <cd-table-actions class="table-actions"
@@ -62,4 +61,26 @@
       </ul>
     </ng-container>
   </div>
+</ng-template>
+
+<ng-template #removingStatTpl
+             let-column="column"
+             let-value="value"
+             let-row="row">
+
+  <i [ngClass]="[icons.spinner, icons.spin]"
+     *ngIf="row.cdExecuting"></i>
+  <span [ngClass]="column?.customTemplateConfig?.valueClass">
+    {{ value }}
+  </span>
+  <span *ngIf="row.cdExecuting"
+        [ngClass]="column?.customTemplateConfig?.executingClass ?
+        column.customTemplateConfig.executingClass :
+        'text-muted italic'">
+    ({{ row.cdExecuting }})
+  </span>
+  <i *ngIf="row.source && row.source === 'REMOVING'"
+     i18n-title
+     title="RBD in status 'Removing'"
+     class="{{ icons.warning }} warn"></i>
 </ng-template>

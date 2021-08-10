@@ -6,15 +6,15 @@ import { RouterTestingModule } from '@angular/router/testing';
 import { ToastrModule } from 'ngx-toastr';
 import { of } from 'rxjs';
 
-import { configureTestBed, i18nProviders } from '../../../../testing/unit-test-helper';
-import { CoreModule } from '../../../core/core.module';
-import { CephServiceService } from '../../../shared/api/ceph-service.service';
-import { OrchestratorService } from '../../../shared/api/orchestrator.service';
-import { CdTableFetchDataContext } from '../../../shared/models/cd-table-fetch-data-context';
-import { Permissions } from '../../../shared/models/permissions';
-import { AuthStorageService } from '../../../shared/services/auth-storage.service';
-import { SharedModule } from '../../../shared/shared.module';
-import { CephModule } from '../../ceph.module';
+import { CephModule } from '~/app/ceph/ceph.module';
+import { CoreModule } from '~/app/core/core.module';
+import { CephServiceService } from '~/app/shared/api/ceph-service.service';
+import { OrchestratorService } from '~/app/shared/api/orchestrator.service';
+import { CdTableFetchDataContext } from '~/app/shared/models/cd-table-fetch-data-context';
+import { Permissions } from '~/app/shared/models/permissions';
+import { AuthStorageService } from '~/app/shared/services/auth-storage.service';
+import { SharedModule } from '~/app/shared/shared.module';
+import { configureTestBed } from '~/testing/unit-test-helper';
 import { ServicesComponent } from './services.component';
 
 describe('ServicesComponent', () => {
@@ -32,8 +32,6 @@ describe('ServicesComponent', () => {
       service_type: 'osd',
       service_name: 'osd',
       status: {
-        container_image_id: 'e70344c77bcbf3ee389b9bf5128f635cf95f3d59e005c5d8e67fc19bcc74ed23',
-        container_image_name: 'docker.io/ceph/daemon-base:latest-master-devel',
         size: 3,
         running: 3,
         last_refresh: '2020-02-25T04:33:26.465699'
@@ -43,8 +41,6 @@ describe('ServicesComponent', () => {
       service_type: 'crash',
       service_name: 'crash',
       status: {
-        container_image_id: 'e70344c77bcbf3ee389b9bf5128f635cf95f3d59e005c5d8e67fc19bcc74ed23',
-        container_image_name: 'docker.io/ceph/daemon-base:latest-master-devel',
         size: 1,
         running: 1,
         last_refresh: '2020-02-25T04:33:26.465766'
@@ -62,15 +58,14 @@ describe('ServicesComponent', () => {
       RouterTestingModule,
       ToastrModule.forRoot()
     ],
-    providers: [{ provide: AuthStorageService, useValue: fakeAuthStorageService }, i18nProviders],
-    declarations: []
+    providers: [{ provide: AuthStorageService, useValue: fakeAuthStorageService }]
   });
 
   beforeEach(() => {
     fixture = TestBed.createComponent(ServicesComponent);
     component = fixture.componentInstance;
-    const orchService = TestBed.get(OrchestratorService);
-    const cephServiceService = TestBed.get(CephServiceService);
+    const orchService = TestBed.inject(OrchestratorService);
+    const cephServiceService = TestBed.inject(CephServiceService);
     spyOn(orchService, 'status').and.returnValue(of({ available: true }));
     spyOn(cephServiceService, 'list').and.returnValue(of(services));
     fixture.detectChanges();
@@ -92,7 +87,7 @@ describe('ServicesComponent', () => {
   });
 
   it('should return all services', () => {
-    component.getServices(new CdTableFetchDataContext(() => {}));
+    component.getServices(new CdTableFetchDataContext(() => undefined));
     expect(component.services.length).toBe(2);
   });
 
