@@ -88,7 +88,7 @@ ${BUILDSRC}: ${SRCDIR} patches
 deb: ${DEBS} ${DBG_DEBS}
 ${DEBS_REST} ${DBG_DEBS}: $(MAIN_DEB)
 $(MAIN_DEB): ${BUILDSRC}
-	cd ${BUILDSRC}; dpkg-buildpackage -b -uc -us -j1
+	cd ${BUILDSRC}; dpkg-buildpackage -b -uc -us -j1 -nc
 	lintian ${DEBS}
 	@echo ${DEBS}
 
